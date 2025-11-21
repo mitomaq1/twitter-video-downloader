@@ -45,7 +45,7 @@ export async function extractVideoInfo(url) {
       formats: []
     };
 
-    // Try to extract video URLs from the page
+    // Try to extract video URLs from the page (only for this specific tweet)
     try {
       const pageResponse = await axios.get(normalizedUrl, {
         timeout: 15000,
@@ -56,10 +56,13 @@ export async function extractVideoInfo(url) {
         }
       });
 
-      // Extract video URLs from page content
-      const videoUrls = extractVideoUrlsFromPage(pageResponse.data);
+      // Extract video URLs from page content - ONLY for this tweet ID
+      const videoUrls = extractVideoUrlsFromPage(pageResponse.data, tweetId);
       if (videoUrls.length > 0) {
         videoInfo.formats = videoUrls;
+        console.log(`[EXTRACT] Found ${videoUrls.length} video formats for tweet ${tweetId}`);
+      } else {
+        console.log(`[EXTRACT] No video formats found for tweet ${tweetId}`);
       }
     } catch (error) {
       console.error('Page fetch error:', error.message);
@@ -327,35 +330,97 @@ function normalizeTwitterUrl(url) {
 }
 
 /**
- * Extracts video URLs from Twitter page HTML
+ * Extracts video URLs from Twitter page HTML - ONLY for the specific tweet ID
  * @param {string} html - Page HTML content
+ * @param {string} tweetId - Tweet ID to match
  * @returns {Array} Array of video format objects
  */
-function extractVideoUrlsFromPage(html) {
+function extractVideoUrlsFromPage(html, tweetId) {
   const formats = [];
   
-  // Try to find video URLs in the HTML
-  // Twitter embeds video URLs in various formats
-  // This is a simplified extraction - production would need more robust parsing
+  if (!tweetId) {
+    console.warn('[EXTRACT] No tweet ID provided for video URL extraction');
+    return formats;
+  }
   
-  // Look for video URLs in script tags (Twitter embeds data as JSON)
+  // Look for video URLs in script tags that contain the tweet ID
   const scriptMatches = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
   if (scriptMatches) {
     for (const script of scriptMatches) {
-      // Try to find video URLs
-      const videoUrlMatches = script.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/gi);
-      if (videoUrlMatches) {
-        videoUrlMatches.forEach((url, index) => {
-          formats.push({
-            url: url,
-            quality: `format_${index + 1}`,
-            format: 'mp4'
-          });
-        });
+      // Only process scripts that contain the tweet ID
+      if (!script.includes(tweetId)) continue;
+      
+      // Try to find JSON data for this specific tweet
+      const tweetDataPattern = new RegExp(`"id_str"\\s*:\\s*"${tweetId}"[\\s\\S]{0,50000}`, 'i');
+      const tweetDataMatch = script.match(tweetDataPattern);
+      
+      if (tweetDataMatch) {
+        const tweetData = tweetDataMatch[0];
+        
+        // Look for video variants array
+        const variantsPattern = /"variants"\s*:\s*\[([^\]]+)\]/i;
+        const variantsMatch = tweetData.match(variantsPattern);
+        
+        if (variantsMatch) {
+          // Extract URLs from variants
+          const urlMatches = variantsMatch[1].match(/"url"\s*:\s*"([^"]+)"/gi);
+          if (urlMatches) {
+            urlMatches.forEach((match, index) => {
+              const urlMatch = match.match(/"url"\s*:\s*"([^"]+)"/i);
+              if (urlMatch && urlMatch[1]) {
+                let videoUrl = urlMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+                if (videoUrl.includes('.mp4') || videoUrl.includes('video.twimg.com')) {
+                  // Try to determine quality from URL
+                  let quality = 'unknown';
+                  if (videoUrl.includes('bitrate')) {
+                    const bitrateMatch = videoUrl.match(/bitrate[=:](\d+)/i);
+                    if (bitrateMatch) {
+                      quality = `${bitrateMatch[1]}kbps`;
+                    }
+                  } else if (videoUrl.includes('playlist')) {
+                    quality = 'playlist';
+                  } else {
+                    quality = `format_${index + 1}`;
+                  }
+                  
+                  formats.push({
+                    url: videoUrl,
+                    quality: quality,
+                    format: 'mp4'
+                  });
+                }
+              }
+            });
+          }
+        }
+        
+        // Also look for direct video_url patterns
+        const directVideoPatterns = [
+          new RegExp(`"video_url_https"\\s*:\\s*"([^"]+)"`, 'i'),
+          new RegExp(`"video_url"\\s*:\\s*"([^"]+)"`, 'i')
+        ];
+        
+        for (const pattern of directVideoPatterns) {
+          const matches = tweetData.match(pattern);
+          if (matches && matches[1]) {
+            let videoUrl = matches[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+            if (videoUrl.includes('.mp4') || videoUrl.includes('video.twimg.com')) {
+              // Check if we already have this URL
+              if (!formats.some(f => f.url === videoUrl)) {
+                formats.push({
+                  url: videoUrl,
+                  quality: 'default',
+                  format: 'mp4'
+                });
+              }
+            }
+          }
+        }
       }
     }
   }
 
+  console.log(`[EXTRACT] Extracted ${formats.length} video formats for tweet ${tweetId}`);
   return formats;
 }
 
