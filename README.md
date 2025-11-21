@@ -213,6 +213,25 @@ Netlify sadece frontend'i host eder. Backend için ayrı bir servis gerekir:
 
 Backend deploy talimatları için `NETLIFY_DEPLOY.md` dosyasına bakın.
 
+## Testing
+
+### Manual Test Script
+
+PowerShell script ile otomatik test yapabilirsiniz:
+
+```powershell
+# Tek bir URL test et
+.\test-video-download.ps1 -TwitterUrl "https://twitter.com/username/status/1234567890"
+
+# Birden fazla URL test et (script'i düzenleyerek)
+.\test-automated.ps1
+```
+
+Test script'i şunları kontrol eder:
+- Backend'in çalışıp çalışmadığı
+- Video bilgilerinin çıkarılıp çıkarılmadığı
+- Download endpoint'inin çalışıp çalışmadığı
+
 ## Troubleshooting
 
 ### Netlify "Page not found" hatası
