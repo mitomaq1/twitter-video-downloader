@@ -145,55 +145,80 @@ async function getDirectVideoUrl(url, tweetId) {
       tweetId = tweetIdMatch ? tweetIdMatch[1] : null;
     }
 
-    // Fetch the Twitter page
+    if (!tweetId) {
+      console.error('No tweet ID available for video extraction');
+      return null;
+    }
+
+    // Fetch the Twitter page with better headers to get JavaScript-rendered content
     const response = await axios.get(url, {
-      timeout: 15000,
+      timeout: 20000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://twitter.com/',
+        'Cookie': 'lang=en'
       }
     });
 
     const html = response.data;
+    
+    console.log(`Extracting video for tweet ID: ${tweetId}`);
 
-    // Method 1: Look for tweet-specific data in script tags (Twitter embeds tweet data as JSON)
-    // Twitter stores tweet data in window.__INITIAL_STATE__ or similar
+    // Method 1: Look for tweet-specific JSON data in script tags
+    // Twitter stores tweet data in various script tags with JSON
     const scriptMatches = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
     if (scriptMatches) {
       for (const script of scriptMatches) {
-        // Look for tweet ID in the script to ensure we get the right video
-        if (tweetId && script.includes(tweetId)) {
-          // Extract video URLs from this specific tweet's data
-          const videoUrlPatterns = [
-            new RegExp(`"video_url":"([^"]+)"`, 'i'),
-            new RegExp(`"contentUrl":"([^"]+\\.mp4[^"]*)"`, 'i'),
-            new RegExp(`"video_url_https":"([^"]+)"`, 'i'),
-            new RegExp(`"variants":\\s*\\[([^\\]]+)\\]`, 'i')
-          ];
-
-          for (const pattern of videoUrlPatterns) {
-            const matches = script.match(pattern);
-            if (matches) {
-              for (const match of matches) {
-                // Extract URL from match
-                let videoUrl = match.replace(/^"video_url":"|"$|"contentUrl":"|"$|"video_url_https":"|"$/g, '');
-                
-                // Handle variants array
-                if (match.includes('variants')) {
-                  const variantsMatch = match.match(/"url":"([^"]+\\.mp4[^"]*)"/i);
-                  if (variantsMatch) {
-                    videoUrl = variantsMatch[1];
-                  }
-                }
-
-                if (videoUrl && (videoUrl.includes('.mp4') || videoUrl.includes('video.twimg.com'))) {
-                  // Clean up the URL
-                  videoUrl = videoUrl.replace(/\\u002F/g, '/').replace(/\\\//g, '/');
-                  if (videoUrl.startsWith('http')) {
+        // Only process scripts that contain the tweet ID
+        if (!script.includes(tweetId)) continue;
+        
+        // Try to find JSON objects that contain both tweet ID and video data
+        // Look for patterns like: "id_str":"1234567890" followed by video URLs
+        const tweetDataPattern = new RegExp(`"id_str"\\s*:\\s*"${tweetId}"[\\s\\S]{0,50000}`, 'i');
+        const tweetDataMatch = script.match(tweetDataPattern);
+        
+        if (tweetDataMatch) {
+          const tweetData = tweetDataMatch[0];
+          
+          // Look for video variants array - Twitter stores videos in variants
+          const variantsPattern = /"variants"\s*:\s*\[([^\]]+)\]/i;
+          const variantsMatch = tweetData.match(variantsPattern);
+          
+          if (variantsMatch) {
+            // Extract all URLs from variants
+            const urlMatches = variantsMatch[1].match(/"url"\s*:\s*"([^"]+)"/gi);
+            if (urlMatches) {
+              // Find the highest quality video (usually the last one or one without bitrate in name)
+              for (let i = urlMatches.length - 1; i >= 0; i--) {
+                const urlMatch = urlMatches[i].match(/"url"\s*:\s*"([^"]+)"/i);
+                if (urlMatch && urlMatch[1]) {
+                  let videoUrl = urlMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+                  if (videoUrl.includes('.mp4') || videoUrl.includes('video.twimg.com')) {
+                    console.log(`Found video URL in variants: ${videoUrl}`);
                     return videoUrl;
                   }
                 }
+              }
+            }
+          }
+          
+          // Fallback: Look for direct video_url patterns within this tweet's data
+          const videoUrlPatterns = [
+            new RegExp(`"video_url_https"\\s*:\\s*"([^"]+)"`, 'i'),
+            new RegExp(`"video_url"\\s*:\\s*"([^"]+)"`, 'i'),
+            new RegExp(`"contentUrl"\\s*:\\s*"([^"]+\\.mp4[^"]*)"`, 'i')
+          ];
+
+          for (const pattern of videoUrlPatterns) {
+            const matches = tweetData.match(pattern);
+            if (matches && matches[1]) {
+              let videoUrl = matches[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+              if (videoUrl.includes('.mp4') || videoUrl.includes('video.twimg.com')) {
+                console.log(`Found video URL: ${videoUrl}`);
+                return videoUrl;
               }
             }
           }
@@ -201,22 +226,46 @@ async function getDirectVideoUrl(url, tweetId) {
       }
     }
 
-    // Method 2: Look for video URLs near the tweet ID in HTML
+    // Method 2: Look for video URLs in the context of the specific tweet
+    // Find HTML sections that contain the tweet ID and look for video elements nearby
     if (tweetId) {
-      // Find the section of HTML that contains this tweet ID
-      const tweetSectionMatch = html.match(new RegExp(`[^>]*${tweetId}[^<]*<[^>]*>([\\s\\S]{0,50000})`, 'i'));
-      if (tweetSectionMatch) {
-        const tweetSection = tweetSectionMatch[1];
-        // Look for video URLs in this specific section
-        const videoUrlMatches = tweetSection.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
-        if (videoUrlMatches && videoUrlMatches.length > 0) {
-          // Return the first video URL found in this tweet's section
-          return videoUrlMatches[0];
+      // Look for video tags or sources near the tweet ID
+      const tweetContextPattern = new RegExp(`[\\s\\S]{0,20000}${tweetId}[\\s\\S]{0,20000}`, 'i');
+      const tweetContextMatch = html.match(tweetContextPattern);
+      
+      if (tweetContextMatch) {
+        const context = tweetContextMatch[0];
+        
+        // Look for video source tags
+        const videoSourceMatches = context.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)["']/gi);
+        if (videoSourceMatches) {
+          for (const match of videoSourceMatches) {
+            const urlMatch = match.match(/src=["']([^"']+)["']/i);
+            if (urlMatch && urlMatch[1]) {
+              const videoUrl = urlMatch[1];
+              if (videoUrl.includes('video.twimg.com') || videoUrl.includes('.mp4')) {
+                console.log(`Found video URL in source tag: ${videoUrl}`);
+                return videoUrl;
+              }
+            }
+          }
+        }
+        
+        // Look for video URLs in data attributes
+        const dataVideoMatches = context.match(/data-video-url=["']([^"']+\.mp4[^"']*)["']/gi);
+        if (dataVideoMatches) {
+          for (const match of dataVideoMatches) {
+            const urlMatch = match.match(/data-video-url=["']([^"']+)["']/i);
+            if (urlMatch && urlMatch[1]) {
+              console.log(`Found video URL in data attribute: ${urlMatch[1]}`);
+              return urlMatch[1];
+            }
+          }
         }
       }
     }
 
-    // Method 3: Fallback - look for video URLs but prioritize ones that seem tweet-specific
+    // Method 3: Last resort - look for all video URLs and try to match by tweet ID in URL
     const allVideoUrls = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
     if (allVideoUrls && allVideoUrls.length > 0) {
       // Filter URLs that look like Twitter video CDN URLs
@@ -225,15 +274,23 @@ async function getDirectVideoUrl(url, tweetId) {
       );
       
       if (twitterVideoUrls.length > 0) {
-        // If we have tweet ID, try to find URL that might be related
-        // Otherwise return the first Twitter video URL
+        // Try to find URL that contains tweet ID or is most likely to be the correct one
+        // Twitter video URLs sometimes contain media IDs that might relate to the tweet
+        for (const videoUrl of twitterVideoUrls) {
+          // Prefer URLs that seem more complete (have more path segments)
+          if (videoUrl.split('/').length > 5) {
+            console.log(`Found potential video URL (longer path): ${videoUrl}`);
+            return videoUrl;
+          }
+        }
+        
+        // Return the first Twitter video URL as fallback
+        console.log(`Using first Twitter video URL as fallback: ${twitterVideoUrls[0]}`);
         return twitterVideoUrls[0];
       }
-      
-      // Last resort: return first video URL
-      return allVideoUrls[0];
     }
 
+    console.error(`Could not find video URL for tweet ${tweetId}`);
     return null;
   } catch (error) {
     console.error('Error getting direct video URL:', error.message);
