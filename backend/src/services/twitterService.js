@@ -105,15 +105,23 @@ export async function downloadVideo(url, quality, res) {
       // If we can't get direct URL, return the video info with instructions
       return res.status(404).json({
         error: {
-          message: 'Direct video URL not available. Please use the extract endpoint to get video information.',
+          message: 'Could not extract video URL for this tweet. Twitter\'s HTML structure may have changed, or the video may not be directly accessible.',
           videoInfo: videoInfo,
-          note: 'For full download functionality, install yt-dlp on the server and configure it in the service.'
+          note: 'For reliable video downloads, consider using yt-dlp on the server. The current method relies on parsing Twitter\'s HTML which can be unreliable.',
+          suggestion: 'Try using a dedicated Twitter video downloader tool or browser extension for more reliable results.'
         }
       });
     }
 
     console.log(`[DOWNLOAD] Found video URL: ${videoUrl}`);
-    console.log(`[DOWNLOAD] Video URL matches tweet ${videoInfo.tweetId}: ${videoUrl.includes(videoInfo.tweetId) || 'N/A'}`);
+    console.log(`[DOWNLOAD] Video URL length: ${videoUrl.length}`);
+    console.log(`[DOWNLOAD] Video URL domain: ${new URL(videoUrl).hostname}`);
+    
+    // Verify the URL looks like a valid Twitter video URL
+    if (!videoUrl.includes('video.twimg.com') && !videoUrl.includes('twimg.com')) {
+      console.warn(`[DOWNLOAD] WARNING: Video URL does not appear to be from Twitter CDN: ${videoUrl}`);
+      console.warn(`[DOWNLOAD] This might be the wrong video!`);
+    }
 
     // Stream video from Twitter CDN
     const videoResponse = await axios.get(videoUrl, {
@@ -274,32 +282,81 @@ async function getDirectVideoUrl(url, tweetId) {
       }
     }
 
-    // Method 3: Last resort - look for all video URLs and try to match by tweet ID in URL
-    const allVideoUrls = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
-    if (allVideoUrls && allVideoUrls.length > 0) {
-      // Filter URLs that look like Twitter video CDN URLs
-      const twitterVideoUrls = allVideoUrls.filter(url => 
-        url.includes('video.twimg.com') || url.includes('twimg.com')
-      );
-      
-      if (twitterVideoUrls.length > 0) {
-        // Try to find URL that contains tweet ID or is most likely to be the correct one
-        // Twitter video URLs sometimes contain media IDs that might relate to the tweet
-        for (const videoUrl of twitterVideoUrls) {
-          // Prefer URLs that seem more complete (have more path segments)
-          if (videoUrl.split('/').length > 5) {
-            console.log(`Found potential video URL (longer path): ${videoUrl}`);
-            return videoUrl;
+    // Method 3: Parse entire JSON structure to find tweet-specific video
+    // Twitter stores all tweet data in a large JSON object
+    try {
+      // Look for window.__INITIAL_STATE__ or similar global state objects
+      const statePatterns = [
+        /window\.__INITIAL_STATE__\s*=\s*({[\s\S]+?});/i,
+        /window\.__INITIAL_DATA__\s*=\s*({[\s\S]+?});/i,
+        /"statuses"\s*:\s*\[([^\]]+)\]/i
+      ];
+
+      for (const pattern of statePatterns) {
+        const stateMatch = html.match(pattern);
+        if (stateMatch) {
+          try {
+            // Try to parse as JSON (might be partial)
+            const jsonStr = stateMatch[1] || stateMatch[0];
+            // Find the specific tweet object
+            const tweetObjPattern = new RegExp(`"id_str"\\s*:\\s*"${tweetId}"[\\s\\S]{0,100000}?"media"\\s*:[\\s\\S]{0,50000}?`, 'i');
+            const tweetObjMatch = jsonStr.match(tweetObjPattern);
+            
+            if (tweetObjMatch) {
+              const tweetObj = tweetObjMatch[0];
+              
+              // Look for video_info or variants in this specific tweet object
+              const videoInfoPattern = /"video_info"\s*:\s*{[\s\S]{0,10000}?"variants"\s*:\s*\[([^\]]+)\]/i;
+              const videoInfoMatch = tweetObj.match(videoInfoPattern);
+              
+              if (videoInfoMatch) {
+                const variantsStr = videoInfoMatch[1];
+                const urlMatches = variantsStr.match(/"url"\s*:\s*"([^"]+)"/gi);
+                
+                if (urlMatches && urlMatches.length > 0) {
+                  // Get the highest quality (usually the last one or highest bitrate)
+                  let bestUrl = null;
+                  let highestBitrate = 0;
+                  
+                  for (const match of urlMatches) {
+                    const urlMatch = match.match(/"url"\s*:\s*"([^"]+)"/i);
+                    if (urlMatch && urlMatch[1]) {
+                      let videoUrl = urlMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+                      
+                      // Check bitrate if available
+                      const bitrateMatch = variantsStr.match(/"bitrate"\s*:\s*(\d+)/i);
+                      const bitrate = bitrateMatch ? parseInt(bitrateMatch[1]) : 0;
+                      
+                      if (videoUrl.includes('.mp4') || videoUrl.includes('video.twimg.com')) {
+                        if (bitrate > highestBitrate || !bestUrl) {
+                          bestUrl = videoUrl;
+                          highestBitrate = bitrate;
+                        }
+                      }
+                    }
+                  }
+                  
+                  if (bestUrl) {
+                    console.log(`Found video URL in tweet JSON object: ${bestUrl}`);
+                    return bestUrl;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            // Continue to next method
+            console.log('JSON parsing failed, trying next method');
           }
         }
-        
-        // Return the first Twitter video URL as fallback
-        console.log(`Using first Twitter video URL as fallback: ${twitterVideoUrls[0]}`);
-        return twitterVideoUrls[0];
       }
+    } catch (error) {
+      console.log('Method 3 failed:', error.message);
     }
 
-    console.error(`Could not find video URL for tweet ${tweetId}`);
+    // Method 4: Last resort - DO NOT use generic video URLs
+    // Instead, return null and let the user know we couldn't find the specific video
+    console.error(`Could not find video URL for tweet ${tweetId} - Twitter HTML structure may have changed`);
+    console.error('This is a known limitation. Consider using yt-dlp for more reliable video extraction.');
     return null;
   } catch (error) {
     console.error('Error getting direct video URL:', error.message);
