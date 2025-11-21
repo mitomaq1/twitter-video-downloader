@@ -20,10 +20,18 @@ export async function extractVideoInfo(url) {
     const response = await api.post('/extract', { url });
     return response.data;
   } catch (error) {
-    if (error.response) {
-      throw new Error(error.response.data?.error?.message || 'Failed to extract video info');
+    // Daha detaylı hata mesajları
+    if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
+      throw new Error('Backend server is not available. Please make sure the backend is deployed and running. Check DEPLOY.md for deployment instructions.');
     }
-    throw new Error(error.message || 'Network error');
+    if (error.response) {
+      const errorMessage = error.response.data?.error?.message || 'Failed to extract video info';
+      throw new Error(errorMessage);
+    }
+    if (error.message.includes('timeout')) {
+      throw new Error('Request timed out. The server may be slow or unavailable.');
+    }
+    throw new Error(error.message || 'Network error. Please check your connection and try again.');
   }
 }
 

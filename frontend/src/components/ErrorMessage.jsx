@@ -1,4 +1,4 @@
-function ErrorMessage({ message, onClose }) {
+function ErrorMessage({ message, onClose, showBackendHelp = false }) {
   return (
     <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
       <svg
@@ -17,6 +17,22 @@ function ErrorMessage({ message, onClose }) {
       <div className="flex-1">
         <p className="text-sm text-red-800 font-medium">Error</p>
         <p className="text-sm text-red-700">{message}</p>
+        {showBackendHelp && (
+          <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+            <p className="text-xs text-yellow-800 font-semibold mb-1">💡 Backend Deploy Gerekli</p>
+            <p className="text-xs text-yellow-700 mb-2">
+              Backend server deploy edilmemiş. Uygulamanın çalışması için backend'i deploy etmeniz gerekiyor.
+            </p>
+            <a
+              href="https://github.com/mitomaq1/twitter-video-downloader/blob/main/QUICK_DEPLOY_BACKEND.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:text-blue-800 underline"
+            >
+              📖 Backend Deploy Rehberi (Railway/Render/Heroku)
+            </a>
+          </div>
+        )}
       </div>
       {onClose && (
         <button

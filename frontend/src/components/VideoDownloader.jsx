@@ -119,7 +119,13 @@ function VideoDownloader() {
           </button>
         </div>
 
-        {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
+        {error && (
+          <ErrorMessage 
+            message={error} 
+            onClose={() => setError(null)}
+            showBackendHelp={error.includes('Backend server is not available')}
+          />
+        )}
 
         {loading && (
           <div className="mt-4">
