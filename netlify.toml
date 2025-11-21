@@ -1,18 +1,30 @@
+# Netlify Build Configuration for Twitter Video Downloader
 [build]
+  # Frontend klasöründe build yap
   base = "frontend"
+  # Build komutu
   command = "npm install && npm run build"
+  # Publish edilecek klasör (Vite build çıktısı)
   publish = "frontend/dist"
 
-# SPA routing için tüm route'ları index.html'e yönlendir
+# SPA (Single Page Application) routing
+# Tüm route'ları index.html'e yönlendir (React Router için)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
+# Build environment variables
 [build.environment]
   NODE_VERSION = "18"
-  
-# Functions (opsiyonel - backend için)
-[functions]
-  directory = "backend"
+  NPM_VERSION = "9"
+
+# Headers (güvenlik ve performans)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
 
