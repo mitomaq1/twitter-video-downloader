@@ -182,7 +182,44 @@ twitter-video-downloader/
 - Always respect copyright and Twitter's Terms of Service
 - Users are responsible for ensuring they have permission to download content
 
+## Deployment
+
+### Netlify (Frontend)
+
+1. **Netlify.com'a giriş yapın** ve "Add new site" → "Import an existing project" seçin
+2. **GitHub repository'nizi seçin**
+3. **Build ayarlarını yapılandırın:**
+   ```
+   Base directory: frontend
+   Build command: npm install && npm run build
+   Publish directory: frontend/dist
+   ```
+4. **Environment Variables ekleyin (opsiyonel):**
+   ```
+   VITE_API_URL = https://your-backend-url.com/api
+   ```
+5. **"Deploy site" butonuna tıklayın**
+
+**Not:** `netlify.toml` dosyası zaten projede mevcut, bu ayarları otomatik olarak uygular.
+
+Detaylı talimatlar için `NETLIFY_DEPLOY.md` dosyasına bakın.
+
+### Backend Hosting
+
+Netlify sadece frontend'i host eder. Backend için ayrı bir servis gerekir:
+- **Railway** (Önerilen): https://railway.app
+- **Render**: https://render.com
+- **Heroku**: https://heroku.com
+
+Backend deploy talimatları için `NETLIFY_DEPLOY.md` dosyasına bakın.
+
 ## Troubleshooting
+
+### Netlify "Page not found" hatası
+- **Base directory**'nin `frontend` olduğundan emin olun
+- **Publish directory**'nin `frontend/dist` olduğundan emin olun
+- Build loglarını kontrol edin
+- `netlify.toml` dosyasının doğru yapılandırıldığından emin olun
 
 ### Backend won't start
 - Check if port 3001 is available
@@ -193,6 +230,7 @@ twitter-video-downloader/
 - Verify backend is running on port 3001
 - Check CORS_ORIGIN in backend `.env` matches frontend URL
 - Check browser console for CORS errors
+- Production'da backend URL'ini environment variable olarak ayarlayın
 
 ### Video extraction fails
 - Verify the Twitter URL is valid and contains a video
