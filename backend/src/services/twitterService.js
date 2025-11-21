@@ -88,14 +88,17 @@ export async function extractVideoInfo(url) {
 export async function downloadVideo(url, quality, res) {
   try {
     const normalizedUrl = normalizeTwitterUrl(url);
+    console.log(`[DOWNLOAD] Starting download for URL: ${normalizedUrl}`);
 
     // Extract video info first to get tweet ID
     const videoInfo = await extractVideoInfo(normalizedUrl);
+    console.log(`[DOWNLOAD] Extracted video info - Tweet ID: ${videoInfo.tweetId}`);
     
     // Try to get direct video URL using tweet ID to ensure we get the correct video
     const videoUrl = await getDirectVideoUrl(normalizedUrl, videoInfo.tweetId);
     
     if (!videoUrl) {
+      console.error(`[DOWNLOAD] No video URL found for tweet ${videoInfo.tweetId}`);
       // If we can't get direct URL, return the video info with instructions
       return res.status(404).json({
         error: {
@@ -105,6 +108,9 @@ export async function downloadVideo(url, quality, res) {
         }
       });
     }
+
+    console.log(`[DOWNLOAD] Found video URL: ${videoUrl}`);
+    console.log(`[DOWNLOAD] Video URL matches tweet ${videoInfo.tweetId}: ${videoUrl.includes(videoInfo.tweetId) || 'N/A'}`);
 
     // Stream video from Twitter CDN
     const videoResponse = await axios.get(videoUrl, {
